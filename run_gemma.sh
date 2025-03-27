@@ -1,0 +1,21 @@
+accelerate launch train_gemma.py \
+  --model_name_or_path unsloth/gemma-3-4b-it \
+  --load_in_4bit \
+  --max_seq_length 2048 \
+  --do_train \
+  --do_eval \
+  --train_file "Data/hf_data.json" \
+  --num_slices 4 \
+  --lora_r 8 \
+  --lora_alpha 8 \
+  --per_device_train_batch_size 32 \
+  --gradient_accumulation_steps 2 \
+  --learning_rate 4e-5 \
+  --max_steps 10000 \
+  --evaluation_strategy steps \
+  --eval_steps 250 \
+  --logging_steps 250 \
+  --save_steps 250 \
+  --output_dir "output_gemma3/" \
+  --logging_dir "output_gemma3/" \
+  --seed 42
