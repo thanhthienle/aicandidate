@@ -1,6 +1,6 @@
-python train_unsloth_gemma.py \
-  --model_name_or_path ../gemma-3-4b-it \
-  --load_in_4bit \
+python train_gemma.py \
+  --model_name_or_path unsloth/gemma-3-4b-it \
+  --load_in_8bit \
   --max_seq_length 2048 \
   --do_train \
   --do_eval \
@@ -11,7 +11,7 @@ python train_unsloth_gemma.py \
   --per_device_train_batch_size 4 \
   --gradient_accumulation_steps 2 \
   --learning_rate 2e-5 \
-  --max_steps 200 \
+  --max_steps 2000 \
   --evaluation_strategy steps \
   --eval_steps 10 \
   --logging_steps 10 \

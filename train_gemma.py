@@ -339,12 +339,6 @@ def main():
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-        if training_args.do_eval:
-            eval_dataset = eval_dataset.rename_column("text", "label")
-            metrics = trainer.evaluate(eval_dataset=eval_dataset)
-            trainer.log_metrics("eval", metrics)
-            trainer.save_metrics("eval", metrics)
-
 
 if __name__ == "__main__":
     main()
