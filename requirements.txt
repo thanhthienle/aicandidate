@@ -1,13 +1,13 @@
-# pytorch version 2.6.0
-transformers == 4.50.0
-datasets == 3.4.1
-evaluate == 0.4.3
-openpyxl == 3.1.5
-sentencepiece == 0.2.0
-accelerate == 1.5.2
-protobuf == 6.30.1
-scikit-learn == 1.5.1
+torch
+torchvision
+torchaudio
+transformers
+datasets
+evaluate
+openpyxl
+sentencepiece
+accelerate
+scikit-learn
 vllm
 unsloth
 trl
-sympy == 1.13.1

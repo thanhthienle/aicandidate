@@ -1,5 +1,5 @@
-accelerate launch train_gemma.py \
-  --model_name_or_path unsloth/gemma-3-4b-it \
+python train_unsloth_gemma.py \
+  --model_name_or_path ../gemma-3-4b-it \
   --load_in_4bit \
   --max_seq_length 2048 \
   --do_train \
@@ -8,14 +8,14 @@ accelerate launch train_gemma.py \
   --num_slices 4 \
   --lora_r 8 \
   --lora_alpha 8 \
-  --per_device_train_batch_size 32 \
+  --per_device_train_batch_size 4 \
   --gradient_accumulation_steps 2 \
-  --learning_rate 4e-5 \
-  --max_steps 10000 \
+  --learning_rate 2e-5 \
+  --max_steps 200 \
   --evaluation_strategy steps \
-  --eval_steps 250 \
-  --logging_steps 250 \
-  --save_steps 250 \
+  --eval_steps 10 \
+  --logging_steps 10 \
+  --save_steps 10 \
   --output_dir "output_gemma3/" \
   --logging_dir "output_gemma3/" \
   --seed 42

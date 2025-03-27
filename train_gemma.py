@@ -2,6 +2,7 @@
 
 import logging
 import sys
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -19,14 +20,14 @@ from transformers import (
     HfArgumentParser,
     Trainer,
     TrainingArguments,
+    DataCollatorForLanguageModeling,
     set_seed,
 )
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 from trl import SFTTrainer, SFTConfig
 
-from accelerate import PartialState
-
+from sklearn.metrics import mean_squared_error
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.50.0")
@@ -187,18 +188,6 @@ def main():
     set_seed(training_args.seed)
 
 
-    # Models and tokenizers with accelerate
-    device_string = f'cuda:{PartialState().local_process_index}'
-    model, tokenizer = FastModel.from_pretrained(
-        model_name = model_args.model_name_or_path,
-        max_seq_length = data_args.max_seq_length,
-        load_in_4bit = model_args.load_in_4bit,    # 4 bit quantization to reduce memory
-        load_in_8bit = model_args.load_in_8bit,    # Slightly more accurate, but costs 2x memory
-        full_finetuning = model_args.full_finetuning, # [NEW!] We have full finetuning now!
-        device_map = {'':device_string},
-    )
-
-
     # Loading a dataset from local files.
     # CSV/JSON training or testing files are needed.
     data_files = {}
@@ -216,18 +205,18 @@ def main():
         "json",
         data_files=data_files,
         cache_dir=model_args.cache_dir,
-        token=model_args.token,
+        # token=model_args.token,
     )
+
+    # Ensure the raw dataset contains the problem (question), code and label
+    def check_data(dataset: datasets.Dataset):
+        missing_keys = []
+        missing_keys = [key for key in ("problem", "answer", "label", "extension") if key not in dataset.features]
+        if missing_keys:
+            raise KeyError(f"Missing required keys in dataset.features: {missing_keys}")
 
     # Converting datasets to the correct format for finetuning purposes
     def standardize_data_formats(examples: datasets.Dataset):
-        # Ensure the raw dataset contains the problem (question), code and label
-        def _check_data(dataset: datasets.Dataset):
-            if any(key not in dataset.features for key in ("problem", "answer", "label", "extension")):
-                missing_keys = [key for key in ("problem", "answer", "label", "extension") if key not in dataset.features]
-                raise KeyError(f"Missing required keys in dataset.features: {missing_keys}")
-        _check_data(examples)
-
         prompt = (
             "Given the following coding problem and its solution, "
             "estimate the likelihood that the code was AI-generated. "
@@ -240,8 +229,20 @@ def main():
             {"content": str(examples["label"]), "role": "assistant"},
         ]
         return examples
+
+    removed_keys = [key for key in raw_datasets["train"].column_names if key != "conversations"]
     for split in raw_datasets:
-        raw_datasets[split] = raw_datasets[split].map(standardize_data_formats)
+        check_data(raw_datasets[split])
+        raw_datasets[split] = raw_datasets[split].map(standardize_data_formats, remove_columns=removed_keys)
+
+    # Models and tokenizers with accelerate
+    model, tokenizer = FastModel.from_pretrained(
+        model_name = model_args.model_name_or_path,
+        max_seq_length = data_args.max_seq_length,
+        load_in_4bit = model_args.load_in_4bit,    # 4 bit quantization to reduce memory
+        load_in_8bit = model_args.load_in_8bit,    # Slightly more accurate, but costs 2x memory
+        full_finetuning = model_args.full_finetuning,
+    )
 
     # Apply the chat template for Gemma-3 onto the conversations, and save it to text
     tokenizer = get_chat_template(
@@ -291,26 +292,36 @@ def main():
             eval_dataset = dataset.select(range(fold_size))
             train_dataset = dataset.select(range(fold_size, dataset_size))
 
+        # Data Collator
+        data_collator = DataCollatorForLanguageModeling(
+            tokenizer=tokenizer,
+            mlm=False,
+            pad_to_multiple_of=8
+        )
+
         trainer = SFTTrainer(
             model = model,
             tokenizer = tokenizer,
             train_dataset = train_dataset,
-            eval_dataset = eval_dataset, # Can set up evaluation!
+            eval_dataset = eval_dataset,
             args = SFTConfig(
                 dataset_text_field = "text",
                 per_device_train_batch_size = training_args.per_device_train_batch_size,
                 gradient_accumulation_steps = training_args.gradient_accumulation_steps, # Use GA to mimic batch size!
                 warmup_steps = training_args.warmup_steps,
                 max_steps = training_args.max_steps,
-                learning_rate = training_args.warmup_steps, # Reduce to 2e-5 for long training runs
+                learning_rate = training_args.learning_rate, # Reduce to 2e-5 for long training runs
                 logging_steps = training_args.logging_steps,
                 optim = training_args.optim,
                 weight_decay = training_args.weight_decay,
                 seed = training_args.seed,
                 save_strategy=training_args.save_strategy,
-                use_liger_kernel = True, # Faster
+                output_dir=training_args.output_dir,
                 report_to = "none", # Use this for WandB etc
+                max_seq_length = data_args.max_seq_length,
+                do_eval=training_args.do_eval
             ),
+            data_collator=data_collator,
         )
 
         # only train on the assistant outputs and ignore the loss on the user's inputs.
@@ -322,7 +333,17 @@ def main():
 
         # Train
         trainer_stats = trainer.train()
-        
+        trainer.save_model()
+        metrics = trainer_stats.metrics
+        trainer.log_metrics("train", metrics)
+        trainer.save_metrics("train", metrics)
+        trainer.save_state()
+
+        if training_args.do_eval:
+            eval_dataset = eval_dataset.rename_column("text", "label")
+            metrics = trainer.evaluate(eval_dataset=eval_dataset)
+            trainer.log_metrics("eval", metrics)
+            trainer.save_metrics("eval", metrics)
 
 
 if __name__ == "__main__":
